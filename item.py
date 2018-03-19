@@ -9,6 +9,7 @@ from unidecode import unidecode
 from urllib.parse import urlparse
 from warnings import warn
 
+import arrow
 from bs4 import BeautifulSoup
 import pandas as pd
 
@@ -27,17 +28,23 @@ class Item:
         composition (dict)
         care (str)
         category ((audience_segment, type))
-        price_history (pd.DataFrame((timestamp, price)))
-        availability (pd.DataFrame((timestamp, location, size, available)))
+        price_history
+            (pd.DataFrame((timestamp, human_timestamp, price)))
+        availability
+            (pd.DataFrame((
+                timestamp, human_timestamp, location, size, available
+            )))
         bought (bool)
         ignore (bool)
         filename (str)
-        price_filename (str)
-        availability_filename (str)
     """
 
-    PRICE_HISTORY_COLUMNS = ['timestamp', 'price']
-    AVAILABILITY_COLUMNS = ['timestamp', 'location', 'size', 'available']
+    PATH = 'items/'
+    FILEPATH = 'items/{audience_segment}/{type}'
+    PRICE_HISTORY_COLUMNS = ['timestamp', 'human_timestamp', 'price']
+    AVAILABILITY_COLUMNS = [
+        'timestamp', 'human_timestamp', 'location', 'size', 'available'
+    ]
     STORE_AVAILABILITY_URL = (
         'https://itxrest.inditex.com/LOMOServiciosRESTCommerce-ws/'
         'common/1/stock/campaign/V{year}/product/part-number/'
@@ -48,49 +55,53 @@ class Item:
         assert 'canonical_url' in kwargs, 'item url not provided'
         self.__dict__.update(kwargs)
 
+    def filename_prefixes(self):
+        return (
+            'bought_' if self.bought is True else ''
+        ) + (
+            'ignore_' if self.ignore is True else ''
+        )
+
+    def json_filename(self):
+        return self.filename + '.json'
+
+    def availability_filename(self):
+        return (
+            self.filename_prefixes() +
+            'availability_' +
+            self.filename +
+            '.csv'
+        )
+
+    def price_filename(self):
+        return self.filename_prefixes() + 'price_' + self.filename + '.csv'
+
     def to_disk(self):
-        self.filepath = 'items/{audience_segment}/{type}'.format(
+        self.filepath = self.FILEPATH.format(
             audience_segment=self.category[0].lower(),
             type=self.category[1].lower()
         )
         os.makedirs(self.filepath, exist_ok=True)
         self.filename = unidecode(
             self.name.lower().replace(' ', '_')
-        ) + '.json'
-        if self.filename in os.listdir(self.filepath):
-            self.filename = (
-                self.filename[:-5] +
-                '_{time}'.format(time=int(time.time())) +
-                self.filename[-5:]
-            )
-        self.price_filename = 'price_' + self.filename[:-5] + '.csv'
-        self.availability_filename = (
-            'availability_' + self.filename[:-5] + '.csv'
         )
-        if self.ignore:
-            self.filename = 'ignore_' + self.filename
-            self.price_filename = 'ignore_' + self.price_filename
-            self.availability_filename = (
-                'ignore_' + self.availability_filename
-            )
-        if self.bought:
-            self.filename = 'bought_' + self.filename
-            self.price_filename = 'bought_' + self.price_filename
-            self.availability_filename = (
-                'bought_' + self.availability_filename
+        if self.json_filename() in os.listdir(self.filepath):
+            self.filename = (
+                self.filename +
+                '_{time}'.format(time=int(time.time()))
             )
 
         to_archive = self.__dict__.copy()
         to_archive.pop('price_history')\
                   .to_csv(
-                      self.filepath + '/' + self.price_filename, index=False
+                      self.filepath + '/' + self.price_filename(), index=False
                   )
         to_archive.pop('availability')\
                   .to_csv(
-                      self.filepath + '/' + self.availability_filename,
+                      self.filepath + '/' + self.availability_filename(),
                       index=False
                   )
-        with open(self.filepath + '/' + self.filename, 'w') as f:
+        with open(self.filepath + '/' + self.json_filename(), 'w') as f:
             print(json.dumps(to_archive), file=f)
 
     @staticmethod
@@ -99,16 +110,16 @@ class Item:
             item = Item(**json.load(f))
         item.price_history = pd.read_csv(
             filepath + '/price_' + filename + '.csv'
-        )
+        ).reindex(columns=Item.PRICE_HISTORY_COLUMNS)
         item.availability = pd.read_csv(
             filepath + '/availability_' + filename + '.csv'
-        )
+        ).reindex(columns=Item.AVAILABILITY_COLUMNS)
         return item
 
     @staticmethod
     def get_soup(url):
         response = requests.get(url)
-        return BeautifulSoup(response.text)
+        return BeautifulSoup(response.text, markup='lxml')
 
     @staticmethod
     def get_data_layer(soup):
@@ -294,11 +305,12 @@ class Item:
         return float(prices.pop())
 
     @staticmethod
-    def price_to_DataFrame(timestamp, price):
-        return pd.DataFrame(
-            [[timestamp, price]],
-            columns=Item.PRICE_HISTORY_COLUMNS
-        )
+    def price_to_DataFrame(timestamp, human_timestamp, price):
+        return pd.DataFrame([{
+            'timestamp': timestamp,
+            'human_timestamp': human_timestamp,
+            'price': price
+        }], columns=Item.PRICE_HISTORY_COLUMNS)
 
     @staticmethod
     def get_size_availabilities(soup):
@@ -308,10 +320,20 @@ class Item:
         }
 
     @staticmethod
-    def availability_to_DataFrame(timestamp, size_availabilities):
+    def availability_to_DataFrame(
+            timestamp,
+            human_timestamp,
+            size_availabilities
+    ):
         return pd.DataFrame(
             [
-                [timestamp, 'online', size, available]
+                {
+                    'timestamp': timestamp,
+                    'human_timestamp': human_timestamp,
+                    'location': 'online',
+                    'size': size,
+                    'available': available
+                }
                 for size, available in size_availabilities.items()
             ],
             columns=Item.AVAILABILITY_COLUMNS
@@ -320,6 +342,7 @@ class Item:
     @staticmethod
     def from_url(url):
         now = int(time.time())
+        now_human = arrow.get(now).to('US/Eastern')
         soup = Item.get_soup(url)
         data_layer = Item.get_data_layer(soup)
         item = Item(
@@ -335,10 +358,14 @@ class Item:
             care=Item.get_care(data_layer),
             category=Item.get_category(soup),
             price_history=Item.price_to_DataFrame(
-                now, Item.get_price(data_layer)
+                timestamp=now,
+                human_timestamp=now_human,
+                price=Item.get_price(data_layer)
             ),
             availability=Item.availability_to_DataFrame(
-                now, Item.get_size_availabilities(soup)
+                timestamp=now,
+                human_timestamp=now_human,
+                size_availabilities=Item.get_size_availabilities(soup)
             ),
             bought=False,
             ignore=False
@@ -348,6 +375,7 @@ class Item:
 
     def update(self, in_memory_update=True, on_disk_update=True):
         now = int(time.time())
+        now_human = arrow.get(int(time.time())).to('US/Eastern')
         soup = self.get_soup(self.canonical_url)
         data_layer = self.get_data_layer(soup)
         price = self.get_price(data_layer)
@@ -355,19 +383,36 @@ class Item:
         if in_memory_update is True:
             self.price_history = pd.concat((
                 self.price_history,
-                self.price_to_DataFrame(now, price)
-            ), axis=1)
+                self.price_to_DataFrame(
+                    timestamp=now,
+                    human_timestamp=now_human,
+                    price=price
+                )
+            ), axis=0)
             self.availability = pd.concat((
                 self.availability,
-                self.availability_to_DataFrame(now, size_availabilities)
-            ), axis=1)
+                self.availability_to_DataFrame(
+                    timestamp=now,
+                    human_timestamp=now_human,
+                    size_availabilities=size_availabilities
+                )
+            ), axis=0)
         if on_disk_update is True:
-            with open(self.filepath + '/' + self.price_filename, 'a') as f:
-                print(str(now) + ',' + str(float(price)), file=f)
+            with open(self.filepath + '/' + self.price_filename(), 'a') as f:
+                print(
+                    str(now) + ',' + str(now_human) + ',' + str(float(price)),
+                    file=f
+                )
             with open(
-                    self.filepath + '/' + self.availability_filename, 'a'
+                    self.filepath + '/' + self.availability_filename(), 'a'
             ) as f:
                 print('\n'.join([
-                    ','.join([str(now), 'online', str(size), str(available)])
+                    ','.join([
+                        str(now),
+                        str(now_human),
+                        'online',
+                        str(size),
+                        str(available)
+                    ])
                     for size, available in size_availabilities.items()
                 ]), file=f)
