@@ -1,6 +1,7 @@
 import argparse
 import os
 from random import random
+import sys
 import time
 from warnings import warn
 
@@ -94,8 +95,8 @@ class Zared:
                                .set_index('canonical_url')
         self.to_disk()
 
-    def add_item(self, url):
-        item = Item.from_url(url)
+    def add_item(self, url, color=None):
+        item = Item.from_url(url, color)
         self.zared = pd.concat([
             self.zared,
             pd.DataFrame({
@@ -153,8 +154,14 @@ if __name__ == '__main__':
     parser.add_argument('--update', action='store_true')
     parser.add_argument('--now', action='store_true')
     parser.add_argument(
-        '--add_item',
+        '--url',
         help='Add an item by providing its url',
+        action='store',
+        type=str
+    )
+    parser.add_argument(
+        '--color',
+        help='Specify a color for --url',
         action='store',
         type=str
     )
@@ -164,5 +171,7 @@ if __name__ == '__main__':
         if args.now is False:
             time.sleep(random() * 15 * 60)
         z.update_all()
-    elif args.add_item is not None:
-        z.add_item(args.add_item)
+    elif args.url is not None:
+        z.add_item(args.url, args.color)
+
+    sys.exit(0)

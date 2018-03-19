@@ -50,6 +50,7 @@ class Item:
         'common/1/stock/campaign/V{year}/product/part-number/'
         '{part_number}?physicalStoreId={store_ids}&ajax=true'
     )
+    COLOR_ANCHOR = '#selectedColor={color_id}'
 
     def __init__(self, **kwargs):
         assert 'canonical_url' in kwargs, 'item url not provided'
@@ -117,9 +118,24 @@ class Item:
         return item
 
     @staticmethod
-    def get_soup(url):
+    def get_soup(url, color=None):
+        color_id = None
         response = requests.get(url)
-        return BeautifulSoup(response.text, markup='lxml')
+        soup = BeautifulSoup(response.text, 'lxml')
+        if color is not None:
+            data = Item.get_data_layer(soup)
+            colors = {
+                color['name'].lower(): color['id']
+                for color in data['product']['detail']['colors']
+            }
+            if color.lower() in colors:
+                color_id = colors.get(color.lower())
+                url += Item.COLOR_ANCHOR.format(color_id=color_id)
+                response = requests.get(url)
+                soup = BeautifulSoup(response.text, 'lxml')
+            else:
+                color = None
+        return soup, color, color_id
 
     @staticmethod
     def get_data_layer(soup):
@@ -146,8 +162,11 @@ class Item:
         ).groups(1)[0]
 
     @staticmethod
-    def get_canonical_url(soup):
-        return soup.find('link', {'rel': 'canonical'})['href']
+    def get_canonical_url(soup, color_id=None):
+        return soup.find('link', {'rel': 'canonical'})['href'] + (
+            Item.COLOR_ANCHOR.format(color_id=color_id)
+            if color_id is not None else ''
+        )
 
     @staticmethod
     def get_image_url(soup):
@@ -156,8 +175,10 @@ class Item:
         )._replace(scheme='https', query='').geturl()
 
     @staticmethod
-    def get_name(soup):
-        return soup.find('h1', {'class': 'product-name'}).contents[0]
+    def get_name(soup, color):
+        return soup.find('h1', {'class': 'product-name'}).contents[0] + (
+            ' ' + color.upper() if color is not None else ''
+        )
 
     @staticmethod
     def get_color(soup):
@@ -340,17 +361,17 @@ class Item:
         )
 
     @staticmethod
-    def from_url(url):
+    def from_url(url, color=None):
         now = int(time.time())
         now_human = arrow.get(now).to('US/Eastern')
-        soup = Item.get_soup(url)
+        soup, color, color_id = Item.get_soup(url, color)
         data_layer = Item.get_data_layer(soup)
         item = Item(
             reference_id=Item.get_reference_id(soup),
             part_number=Item.get_part_number(soup),
-            canonical_url=Item.get_canonical_url(soup),
+            canonical_url=Item.get_canonical_url(soup, color_id),
             image_url=Item.get_image_url(soup),
-            name=Item.get_name(soup),
+            name=Item.get_name(soup, color),
             color=Item.get_color(soup),
             description=Item.get_description(soup),
             dimensions=None,
