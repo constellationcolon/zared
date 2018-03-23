@@ -4,14 +4,19 @@ import os
 import pickle
 import re
 import requests
-import time
 from unidecode import unidecode
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from warnings import warn
 
 import arrow
 from bs4 import BeautifulSoup
 import pandas as pd
+
+with open('stores.json', 'r') as f:
+    STORE_IDS = {
+        store['id']: ' '.join(store['addressLines'])
+        for store in json.load(f)
+    }
 
 
 class Item:
@@ -41,9 +46,12 @@ class Item:
 
     PATH = 'items/'
     FILEPATH = 'items/{audience_segment}/{type}'
-    PRICE_HISTORY_COLUMNS = ['timestamp', 'human_timestamp', 'price']
+    PRICE_HISTORY_COLUMNS = [
+        'timestamp', 'human_timestamp', 'price'
+    ]
     AVAILABILITY_COLUMNS = [
-        'timestamp', 'human_timestamp', 'location', 'size', 'available'
+        'timestamp', 'human_timestamp', 'location', 'store_id',
+        'size', 'size_id', 'available', 'quantity'
     ]
     STORE_AVAILABILITY_URL = (
         'https://itxrest.inditex.com/LOMOServiciosRESTCommerce-ws/'
@@ -89,7 +97,7 @@ class Item:
         if self.json_filename() in os.listdir(self.filepath):
             self.filename = (
                 self.filename +
-                '_{time}'.format(time=int(time.time()))
+                '_{time}'.format(time=arrow.now().timestamp)
             )
 
         to_archive = self.__dict__.copy()
@@ -334,11 +342,47 @@ class Item:
         }], columns=Item.PRICE_HISTORY_COLUMNS)
 
     @staticmethod
-    def get_size_availabilities(soup):
-        return {
-            size_tag['value']: size_tag.get('disabled') is None
-            for size_tag in soup.find(class_='size-list').find_all('input')
-        }
+    def get_size_availabilities(soup, data, color_id=None):
+        response = requests.get(
+            Item.STORE_AVAILABILITY_URL.format(
+                year=arrow.now().year,
+                part_number=Item.get_part_number(soup),
+                store_ids=quote(','.join(map(str, STORE_IDS.keys())))
+            )
+        )
+        stocks = json.loads(response.text).get('stocks') or []
+        sizes = [
+            color
+            for color in data['product']['detail']['colors']
+            if color['id'] == color_id
+        ][0]['sizes'] if color_id is not None else (
+            data['product']['detail']['colors'][0]['sizes']
+        )
+        size_ids_to_names = {size['id']: size['name'] for size in sizes}
+        return [
+            # online store stock
+            {
+                'location': 'online',
+                'store_id': None,
+                'size': size['name'],
+                'size_id': size['id'],
+                'available': size['availability'] is 'in_stock',
+                'quantity': None
+            }
+            for size in sizes
+        ] + [
+            # physical store stock
+            {
+                'location': STORE_IDS[store['physicalStoreId']],
+                'store_id': store['physicalStoreId'],
+                'size': size_ids_to_names[size['sizeId']],
+                'size_id': size['sizeId'],
+                'available': size['quantity'] > 0,
+                'quantity': size['quantity']
+            }
+            for store in stocks
+            for size in store['sizeStocks']
+        ]
 
     @staticmethod
     def availability_to_DataFrame(
@@ -346,24 +390,15 @@ class Item:
             human_timestamp,
             size_availabilities
     ):
-        return pd.DataFrame(
-            [
-                {
-                    'timestamp': timestamp,
-                    'human_timestamp': human_timestamp,
-                    'location': 'online',
-                    'size': size,
-                    'available': available
-                }
-                for size, available in size_availabilities.items()
-            ],
-            columns=Item.AVAILABILITY_COLUMNS
-        )
+        df = pd.DataFrame(size_availabilities)
+        df['timestamp'] = timestamp
+        df['human_timestamp'] = human_timestamp
+        return df.reindex(columns=Item.AVAILABILITY_COLUMNS)
 
     @staticmethod
     def from_url(url, color=None):
-        now = int(time.time())
-        now_human = arrow.get(now).to('US/Eastern')
+        now_human = arrow.now()
+        now = now_human.timestamp
         soup, color, color_id = Item.get_soup(url, color)
         data_layer = Item.get_data_layer(soup)
         item = Item(
@@ -372,7 +407,8 @@ class Item:
             canonical_url=Item.get_canonical_url(soup, color_id),
             image_url=Item.get_image_url(soup),
             name=Item.get_name(soup, color),
-            color=Item.get_color(soup),
+            color=(color or Item.get_color(soup)),
+            color_id=color_id,
             description=Item.get_description(soup),
             dimensions=None,
             composition=Item.get_composition(data_layer),
@@ -386,7 +422,9 @@ class Item:
             availability=Item.availability_to_DataFrame(
                 timestamp=now,
                 human_timestamp=now_human,
-                size_availabilities=Item.get_size_availabilities(soup)
+                size_availabilities=Item.get_size_availabilities(
+                    soup, data_layer, color_id=color_id
+                )
             ),
             bought=False,
             ignore=False
@@ -395,45 +433,47 @@ class Item:
         return item
 
     def update(self, in_memory_update=True, on_disk_update=True):
-        now = int(time.time())
-        now_human = arrow.get(int(time.time())).to('US/Eastern')
-        soup = self.get_soup(self.canonical_url)
+        now_human = arrow.now()
+        now = now_human.timestamp
+        soup, color, color_id = self.get_soup(self.canonical_url, self.color)
         data_layer = self.get_data_layer(soup)
         price = self.get_price(data_layer)
-        size_availabilities = self.get_size_availabilities(soup)
+        size_availabilities = self.get_size_availabilities(
+            soup, data_layer, color_id=self.color_id
+        )
+        new_price_history = self.price_to_DataFrame(
+            timestamp=now,
+            human_timestamp=now_human,
+            price=price
+        )
+        new_availability = self.availability_to_DataFrame(
+            timestamp=now,
+            human_timestamp=now_human,
+            size_availabilities=size_availabilities
+        )
         if in_memory_update is True:
             self.price_history = pd.concat((
                 self.price_history,
-                self.price_to_DataFrame(
-                    timestamp=now,
-                    human_timestamp=now_human,
-                    price=price
-                )
+                new_price_history
             ), axis=0)
             self.availability = pd.concat((
                 self.availability,
-                self.availability_to_DataFrame(
-                    timestamp=now,
-                    human_timestamp=now_human,
-                    size_availabilities=size_availabilities
-                )
+                new_availability
             ), axis=0)
         if on_disk_update is True:
-            with open(self.filepath + '/' + self.price_filename(), 'a') as f:
-                print(
-                    str(now) + ',' + str(now_human) + ',' + str(float(price)),
-                    file=f
-                )
-            with open(
-                    self.filepath + '/' + self.availability_filename(), 'a'
-            ) as f:
-                print('\n'.join([
-                    ','.join([
-                        str(now),
-                        str(now_human),
-                        'online',
-                        str(size),
-                        str(available)
-                    ])
-                    for size, available in size_availabilities.items()
-                ]), file=f)
+            new_price_history.reindex(
+                columns=self.PRICE_HISTORY_COLUMNS
+            ).to_csv(
+                self.filepath + '/' + self.price_filename(),
+                mode='a',
+                index=None,
+                header=None
+            )
+            new_availability.reindex(
+                columns=self.AVAILABILITY_COLUMNS
+            ).to_csv(
+                self.filepath + '/' + self.availability_filename(),
+                mode='a',
+                index=None,
+                header=None
+            )

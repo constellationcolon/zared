@@ -70,11 +70,11 @@ class Zared:
                             'added': added_timestamps[filename],
                             'added_human': arrow.get(
                                 added_timestamps[filename]
-                            ).to('US/Eastern'),
+                            ).to('local'),
                             'last_updated': last_updated_timestamps[filename],
                             'last_updated_human': arrow.get(
                                 last_updated_timestamps[filename]
-                            ).to('US/Eastern'),
+                            ).to('local'),
                             'bought': metadata[filename].bought,
                             'ignore': metadata[filename].ignore,
                         }
@@ -106,11 +106,11 @@ class Zared:
                 'added': item.price_history['timestamp'].min(),
                 'added_human': arrow.get(
                     item.price_history['timestamp'].min()
-                ).to('US/Eastern'),
+                ).to('local'),
                 'last_updated': item.price_history['timestamp'].max(),
                 'last_updated_human': arrow.get(
                     item.price_history['timestamp'].max()
-                ).to('US/Eastern'),
+                ).to('local'),
                 'bought': item.bought,
                 'ignore': item.ignore,
             }, index=[item.canonical_url])
@@ -125,7 +125,7 @@ class Zared:
         filename = zared_row['filename']
         item = Item.from_disk(filepath, filename)
         item.update()
-        self.zared.loc[zared_row.name, 'last_updated'] = int(time.time())
+        self.zared.loc[zared_row.name, 'last_updated'] = arrow.now().timestamp
 
     def update_all(self, ignored=False, bought=False, verbose=False):
         to_update = self.zared
@@ -134,17 +134,17 @@ class Zared:
         if bought is False:
             to_update = to_update[~to_update['bought']]
         if verbose is True:
-            start_time = arrow.utcnow()
-            print('Update started at {utc_epoch} ({eastern})'.format(
+            start_time = arrow.now()
+            print('Update started at {utc_epoch} ({local})'.format(
                 utc_epoch=start_time.timestamp,
-                eastern=start_time.to('US/Eastern')
+                local=start_time
             ))
         self.zared.apply(self.update, axis=1)
         if verbose is True:
-            end_time = arrow.utcnow()
-            print('Update finished at {utc_epoch} ({eastern})'.format(
+            end_time = arrow.now()
+            print('Update finished at {utc_epoch} ({local})'.format(
                 utc_epoch=end_time.timestamp,
-                eastern=end_time.to('US/Eastern')
+                local=end_time
             ))
         self.to_disk()
 
@@ -170,7 +170,7 @@ if __name__ == '__main__':
     if args.update is True:
         if args.now is False:
             time.sleep(random() * 15 * 60)
-        z.update_all()
+        z.update_all(verbose=True)
     elif args.url is not None:
         z.add_item(args.url, args.color)
 

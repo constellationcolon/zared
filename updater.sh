@@ -1,4 +1,4 @@
 #!/bin/bash
 cd /Users/suhang/Documents/Zared
 source activate future
-python zared.py
+python zared.py --update
