@@ -16,7 +16,12 @@ Follow GitHub's instructions above ^
 ### Set up which physical stores you want to check stocks for
 1. Go to https://www.maxmind.com/en/locate-my-ip-address
 2. Copy down your latitude/longitude from the "Approximate Coordinates" column
-3. Go to https://www.zara.com/us/en/stores-locator/search?lat=[your_latitude_here]&lng=[your_longitude_here]&ajax=true, and save the file to your local repo root as `stores.json`, i.e. `cd [/path/to/zared] && curl https://www.zara.com/us/en/stores-locator/search?lat=[your_latitude_here]&lng=[your_longitude_here]&ajax=true -o stores.json`
+3. Go to https://www.zara.com/us/en/stores-locator/search?lat=[your_latitude_here]&lng=[your_longitude_here]&ajax=true, and save the file to your local repo root as `stores.json`, i.e. 
+
+    ```
+    cd [/path/to/zared]
+    curl https://www.zara.com/us/en/stores-locator/search?lat=[your_latitude_here]&lng=[your_longitude_here]&ajax=true -o stores.json
+    ```
 
 ### Set your system up to automatically check prices / stocks
 See https://alvinalexander.com/mac-os-x/mac-osx-startup-crontab-launchd-jobs
@@ -61,7 +66,7 @@ python zared.py --update
 ### Disclaimers and Liability Release
 By using the code provided in this repository, you agree that the creators of and contributors to this repository will not be liable or held responsible for any loss of life, limb, property, or otherwise, or any effect, toward or untoward, concerning your financial, mental, moral, physical, metaphysical, etc. situation as a result of, or in correlation with, the usage of the contents of this repository.
 
-Further, you agree that if you use this tool to programmatically make too many requests to the Zara website and get banned, sued, guillotined, stoned, or otherwise suffer repercussions at the invisible hand of Zara, the fault will be yours and yours alone.
+Further, you agree that if you use the code in this repository to programmatically make too many requests to the Zara website and get banned, sued, guillotined, stoned, or otherwise suffer repercussions for these actions and their ilk, the fault will be yours and yours alone.
 
 TL;DR: Use at your own risk, and your risk alone.
 
