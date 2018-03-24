@@ -1,0 +1,39 @@
+<!-- EXAMPLE UPDATER PLIST -->
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.zared.updater</string>
+
+<!-- depending on the way that your python is set up,
+     you may or may not need to provide your $PATH
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>[your_$PATH_here]</string>
+  </dict>
+ -->
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>[/path/to/zared]/updater.sh</string>
+  </array>
+
+  <key>Nice</key>
+  <integer>1</integer>
+
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardErrorPath</key>
+  <string>[/path/to/zared]/updater.err</string>
+
+  <key>StandardOutPath</key>
+  <string>[/path/to/zared]/updater.out</string>
+</dict>
+</plist>
