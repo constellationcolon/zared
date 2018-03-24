@@ -31,8 +31,8 @@ For example,
 1. Move `com.zared.updater.plist` from this repo into `~/Library/LaunchAgents/`
 2. In `com.zared.updater.plist`, set your `EnvironmentVariable`s (if you need them), and replace `[/path/to/zared]` with the path to your local copy of this repository
 3. In `updater.sh`, replace `[/path/to/zared]` with the path to your local copy of this repository
-4. Do `launchctl load com.com.zared.updater.plist` to start the updater
-4. Do `launchctl unload com.com.zared.updater.plist` if you want to stop the updater
+4. Do `launchctl load com.zared.updater.plist` to start the updater
+4. Do `launchctl unload com.zared.updater.plist` if you want to stop the updater
 
 ## Usage
 
